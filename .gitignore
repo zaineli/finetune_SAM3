@@ -1,5 +1,7 @@
 venv/
+.venv/
 __pycache__/
 *_dataset/
 *_dataset_preview/
 dataset_preview/
+sam3_runs/
