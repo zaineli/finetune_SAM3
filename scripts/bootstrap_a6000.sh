@@ -203,6 +203,7 @@ sam3_root = project_root / "sam3" / "sam3"
 train_py = sam3_root / "train" / "train.py"
 trainer_py = sam3_root / "train" / "trainer.py"
 model_builder_py = sam3_root / "model_builder.py"
+fused_py = sam3_root / "perflib" / "fused.py"
 
 
 def patch_train_entrypoint(path: Path) -> None:
@@ -385,9 +386,61 @@ def patch_trainer(path: Path) -> None:
         print(f"Patch already present in {path}")
 
 
+def patch_fused(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    changed = False
+
+    if "import torch.nn.functional as F\n" not in text:
+        torch_import_pattern = re.compile(r"^import torch\n", re.MULTILINE)
+        text, count = torch_import_pattern.subn("import torch\nimport torch.nn.functional as F\n", text, count=1)
+        if count == 0:
+            raise RuntimeError("Unable to patch fused.py imports; upstream file layout changed.")
+        changed = True
+
+    helper_marker = "def _apply_activation(activation, x):"
+    if helper_marker not in text:
+        insert_marker = "addmm_act_op = torch.ops.aten._addmm_activation\n"
+        helper_block = (
+            "addmm_act_op = torch.ops.aten._addmm_activation\n\n\n"
+            "def _apply_activation(activation, x):\n"
+            "    if activation in [torch.nn.functional.relu, torch.nn.ReLU]:\n"
+            "        return F.relu(x)\n"
+            "    if activation in [torch.nn.functional.gelu, torch.nn.GELU]:\n"
+            "        return F.gelu(x)\n"
+            "    raise ValueError(f\"Unexpected activation {activation}\")\n"
+        )
+        if insert_marker not in text:
+            raise RuntimeError("Unable to patch fused.py helper insertion; upstream file layout changed.")
+        text = text.replace(insert_marker, helper_block, 1)
+        changed = True
+
+    old_grad_guard = (
+        "def addmm_act(activation, linear, mat1):\n"
+        "    if torch.is_grad_enabled():\n"
+        "        raise ValueError(\"Expected grad to be disabled.\")\n"
+    )
+    new_grad_guard = (
+        "def addmm_act(activation, linear, mat1):\n"
+        "    if torch.is_grad_enabled():\n"
+        "        # The fused addmm kernel below detaches weights and only supports inference.\n"
+        "        # During training we need the regular autograd-enabled linear+activation path.\n"
+        "        return _apply_activation(activation, linear(mat1))\n"
+    )
+    if old_grad_guard in text:
+        text = text.replace(old_grad_guard, new_grad_guard, 1)
+        changed = True
+
+    if changed:
+        path.write_text(text, encoding="utf-8")
+        print(f"Patched {path}")
+    else:
+        print(f"Patch already present in {path}")
+
+
 patch_train_entrypoint(train_py)
 patch_model_builder(model_builder_py)
 patch_trainer(trainer_py)
+patch_fused(fused_py)
 PY
 
 log "Rendering tracked SAM3 config templates into the clone."
