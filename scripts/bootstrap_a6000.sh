@@ -12,7 +12,8 @@ TORCHVISION_VERSION="0.23.0"
 SAM3_REPO_URL="https://github.com/facebookresearch/sam3.git"
 SAM3_COMMIT="bfbed072a07a6a52c8d5fdc75a7a186251a835b1"
 HF_TOKEN="${HF_TOKEN:-}"
-GENERATE_DATASETS=0
+GENERATE_JITTERED_BAR_DATASET=0
+JITTERED_BAR_NUM_CHARTS=500
 INSTALL_SYSTEM_PACKAGES=0
 
 usage() {
@@ -34,7 +35,8 @@ Options:
   --torch-version VERSION      Torch version to install (default: ${TORCH_VERSION})
   --torchvision-version VER    Torchvision version to install (default: ${TORCHVISION_VERSION})
   --hf-token TOKEN             Hugging Face token to immediately download sam3.pt
-  --generate-datasets          Force regeneration of chart, volcano, and boxplot datasets
+  --generate-datasets          Force regeneration of the jittered bar dataset only
+  --jittered-bar-num-charts N  Number of jittered bar images to generate (default: ${JITTERED_BAR_NUM_CHARTS})
   --install-system-packages    Install Ubuntu/Debian system packages with apt-get when available
   -h, --help                   Show this help message
 
@@ -42,6 +44,7 @@ Examples:
   $(basename "$0")
   $(basename "$0") --hf-token hf_xxx
   HF_TOKEN=hf_xxx $(basename "$0") --generate-datasets
+  $(basename "$0") --generate-datasets --jittered-bar-num-charts 500
 EOF
 }
 
@@ -76,8 +79,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --generate-datasets)
-      GENERATE_DATASETS=1
+      GENERATE_JITTERED_BAR_DATASET=1
       shift
+      ;;
+    --jittered-bar-num-charts)
+      JITTERED_BAR_NUM_CHARTS="$2"
+      shift 2
       ;;
     --install-system-packages)
       INSTALL_SYSTEM_PACKAGES=1
@@ -257,21 +264,20 @@ print("matplotlib:", matplotlib.__version__)
 print("sam3:", sam3.__version__)
 PY
 
-if [[ "${GENERATE_DATASETS}" -eq 1 ]]; then
-  log "Generating synthetic datasets."
-  (cd "${PROJECT_ROOT}" && "${PYTHON}" jittered_bar_script.py --skip-preview)
-  (cd "${PROJECT_ROOT}" && "${PYTHON}" volcano_script.py --skip-preview)
-  (cd "${PROJECT_ROOT}" && "${PYTHON}" boxplot_script.py --skip-preview)
+generate_jittered_bar_dataset() {
+  log "Generating jittered bar dataset with ${JITTERED_BAR_NUM_CHARTS} images."
+  (cd "${PROJECT_ROOT}" && "${PYTHON}" jittered_bar_script.py --num-charts "${JITTERED_BAR_NUM_CHARTS}" --skip-preview)
+}
+
+if [[ "${GENERATE_JITTERED_BAR_DATASET}" -eq 1 ]]; then
+  generate_jittered_bar_dataset
 else
-  for dataset_name in chart_dataset volcano_dataset boxplot_dataset; do
-    if [[ ! -f "${PROJECT_ROOT}/${dataset_name}/annotations/train.json" ]]; then
-      log "${dataset_name} is missing; generating required datasets automatically."
-      (cd "${PROJECT_ROOT}" && "${PYTHON}" jittered_bar_script.py --skip-preview)
-      (cd "${PROJECT_ROOT}" && "${PYTHON}" volcano_script.py --skip-preview)
-      (cd "${PROJECT_ROOT}" && "${PYTHON}" boxplot_script.py --skip-preview)
-      break
-    fi
-  done
+  if [[ ! -f "${PROJECT_ROOT}/chart_dataset/annotations/train.json" ]]; then
+    log "chart_dataset is missing; generating the required jittered bar dataset automatically."
+    generate_jittered_bar_dataset
+  else
+    log "chart_dataset already exists; skipping dataset generation."
+  fi
 fi
 
 if [[ -n "${HF_TOKEN}" ]]; then
@@ -279,12 +285,13 @@ if [[ -n "${HF_TOKEN}" ]]; then
   "${PYTHON}" "${PROJECT_ROOT}/scripts/download_sam3_checkpoint.py" \
     --token "${HF_TOKEN}" \
     --also-download-config \
-    --validate
+    --validate \
+    --validate-config chart_dataset_ft.yaml
 else
   log "Skipping checkpoint download because no HF token was provided."
 fi
 
 log "Bootstrap complete."
 log "Activate the environment with: source ${VENV_DIR}/bin/activate"
-log "Next step: ${PYTHON} ${PROJECT_ROOT}/scripts/download_sam3_checkpoint.py --token YOUR_HF_TOKEN --validate"
+log "Next step: ${PYTHON} ${PROJECT_ROOT}/scripts/download_sam3_checkpoint.py --token YOUR_HF_TOKEN --validate --validate-config chart_dataset_ft.yaml"
 log "Training entrypoint: cd ${PROJECT_ROOT}/sam3 && python sam3/train/train.py -c train/configs/roboflow_v100/chart_dataset_ft.yaml --use-cluster 0 --num-gpus 1"

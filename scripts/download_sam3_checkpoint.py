@@ -14,7 +14,7 @@ from huggingface_hub.utils import GatedRepoError, HfHubHTTPError, RepositoryNotF
 
 DEFAULT_REPO_ID = "facebook/sam3"
 DEFAULT_FILENAME = "sam3.pt"
-DATASET_CONFIGS = (
+DEFAULT_VALIDATE_CONFIGS = (
     "chart_dataset_ft.yaml",
     "volcano_dataset_ft.yaml",
     "boxplot_dataset_ft.yaml",
@@ -69,10 +69,20 @@ def parse_args() -> argparse.Namespace:
             "loading datasets, loading the checkpoint, and running one smoke forward/loss pass."
         ),
     )
+    parser.add_argument(
+        "--validate-config",
+        action="append",
+        dest="validate_configs",
+        default=None,
+        help=(
+            "Specific training config filename to validate. Repeat for multiple configs. "
+            "Defaults to validating chart, volcano, and boxplot configs."
+        ),
+    )
     return parser.parse_args()
 
 
-def validate_local_setup(project_root: Path) -> None:
+def validate_local_setup(project_root: Path, config_names: tuple[str, ...]) -> None:
     import torch
     from hydra.utils import instantiate
 
@@ -80,7 +90,10 @@ def validate_local_setup(project_root: Path) -> None:
     from sam3.train.train import compose_train_config
 
     config_dir = project_root / "sam3" / "train" / "configs" / "roboflow_v100"
-    for config_name in DATASET_CONFIGS:
+    if not config_names:
+        raise ValueError("At least one config must be provided for validation.")
+
+    for config_name in config_names:
         config_path = config_dir / config_name
         if not config_path.exists():
             raise FileNotFoundError(f"Missing config: {config_path}")
@@ -93,11 +106,12 @@ def validate_local_setup(project_root: Path) -> None:
             raise RuntimeError(f"Unexpected collate output for {config_name}: {batch.keys()}")
         print(f"Validated dataset loading for {config_name}: len={len(dataset)}")
 
-    chart_cfg = compose_train_config(str(config_dir / "chart_dataset_ft.yaml"))
-    model = instantiate(chart_cfg.trainer.model, _convert_="all")
-    loss_fn = instantiate(chart_cfg.trainer.loss.all, _convert_="all")
-    dataset = instantiate(chart_cfg.trainer.data.train.dataset, _convert_="all")
-    collate = instantiate(chart_cfg.trainer.data.train.collate_fn, _convert_="all")
+    smoke_config_name = config_names[0]
+    smoke_cfg = compose_train_config(str(config_dir / smoke_config_name))
+    model = instantiate(smoke_cfg.trainer.model, _convert_="all")
+    loss_fn = instantiate(smoke_cfg.trainer.loss.all, _convert_="all")
+    dataset = instantiate(smoke_cfg.trainer.data.train.dataset, _convert_="all")
+    collate = instantiate(smoke_cfg.trainer.data.train.collate_fn, _convert_="all")
     batch = collate([dataset[0]])["all"]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -126,7 +140,7 @@ def validate_local_setup(project_root: Path) -> None:
     print(
         "Smoke validation passed: "
         f"device={device.type}, core_loss={core_loss.item():.6f}, "
-        f"loss_terms={sorted(loss_dict.keys())[:6]}..."
+        f"config={smoke_config_name}, loss_terms={sorted(loss_dict.keys())[:6]}..."
     )
 
 
@@ -163,6 +177,7 @@ def download_hf_file(
 def main() -> int:
     args = parse_args()
     token = args.token or os.environ.get("HF_TOKEN")
+    validate_configs = tuple(args.validate_configs or DEFAULT_VALIDATE_CONFIGS)
     if not token:
         print(
             "Missing Hugging Face token. Pass --token or set HF_TOKEN in the environment.",
@@ -195,7 +210,7 @@ def main() -> int:
 
         if args.validate:
             project_root = Path(__file__).resolve().parents[1]
-            validate_local_setup(project_root)
+            validate_local_setup(project_root, validate_configs)
     except GatedRepoError as error:
         print(
             "Access to the Hugging Face repo is still gated. Make sure the token belongs to "
