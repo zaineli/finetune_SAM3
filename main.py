@@ -255,6 +255,6 @@ def create_and_save_pair(idx: int):
 #  EXECUTION
 # ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    from script import create_full_dataset
+    from jittered_bar_script import create_full_dataset
 
     create_full_dataset(num_charts=10, output_dir="dataset")
