@@ -4,5 +4,5 @@ defaults:
   - _self_
 
 paths:
-  dataset_root: __PROJECT_ROOT__/boxplot_dataset
-  experiment_log_dir: __PROJECT_ROOT__/sam3_runs/boxplot_dataset_ft
+  dataset_root: ${oc.env:PROJECT_ROOT}/boxplot_dataset
+  experiment_log_dir: ${oc.env:PROJECT_ROOT}/sam3_runs/boxplot_dataset_ft

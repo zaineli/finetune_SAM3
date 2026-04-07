@@ -7,13 +7,13 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PYTHON_BIN="python3"
 VENV_DIR="${PROJECT_ROOT}/.venv"
 TORCH_INDEX_URL="https://download.pytorch.org/whl/cu124"
-TORCH_VERSION="2.8.0"
-TORCHVISION_VERSION="0.23.0"
+TORCH_VERSION="2.6.0"
+TORCHVISION_VERSION="0.21.0"
 SAM3_REPO_URL="https://github.com/facebookresearch/sam3.git"
 SAM3_COMMIT="bfbed072a07a6a52c8d5fdc75a7a186251a835b1"
 HF_TOKEN="${HF_TOKEN:-}"
 GENERATE_JITTERED_BAR_DATASET=0
-JITTERED_BAR_NUM_CHARTS=500
+JITTERED_BAR_NUM_CHARTS=600
 INSTALL_SYSTEM_PACKAGES=0
 
 usage() {
@@ -29,7 +29,7 @@ Bootstraps this project on a fresh GPU server, including:
   6. optionally downloading sam3.pt into the expected checkpoint path
 
 Options:
-  --python PATH                Python executable to use (default: python3)
+  --python PATH                Python executable to use (default: python3.12)
   --venv PATH                  Virtual environment path (default: ${PROJECT_ROOT}/.venv)
   --torch-index-url URL        PyTorch wheel index URL (default: ${TORCH_INDEX_URL})
   --torch-version VERSION      Torch version to install (default: ${TORCH_VERSION})
@@ -44,7 +44,7 @@ Examples:
   $(basename "$0")
   $(basename "$0") --hf-token hf_xxx
   HF_TOKEN=hf_xxx $(basename "$0") --generate-datasets
-  $(basename "$0") --generate-datasets --jittered-bar-num-charts 500
+  $(basename "$0") --generate-datasets --jittered-bar-num-charts 600
 EOF
 }
 
@@ -84,7 +84,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     --jittered-bar-num-charts)
       JITTERED_BAR_NUM_CHARTS="$2"
-      shift 2
+      shift
+      shift
       ;;
     --install-system-packages)
       INSTALL_SYSTEM_PACKAGES=1
@@ -155,7 +156,7 @@ project_root = Path(os.environ["PROJECT_ROOT"]).resolve()
 train_py = project_root / "sam3" / "sam3" / "train" / "train.py"
 text = train_py.read_text(encoding="utf-8")
 
-if "def compose_train_config(config_arg: str):" not in text:
+if "def _ensure_project_root_env(config_path: Path | None = None):" not in text:
     original_import = (
         "from argparse import ArgumentParser\n"
         "from copy import deepcopy\n\n"
@@ -180,13 +181,24 @@ if "def compose_train_config(config_arg: str):" not in text:
         "    cfg = compose(config_name=args.config)\n"
     )
     patched_main = (
-        "\n\ndef compose_train_config(config_arg: str):\n"
+        "\n\ndef _ensure_project_root_env(config_path: Path | None = None):\n"
+        "    if os.environ.get(\"PROJECT_ROOT\"):\n"
+        "        return\n\n"
+        "    if config_path is not None and config_path.exists():\n"
+        "        resolved = config_path.resolve()\n"
+        "        if len(resolved.parents) >= 5:\n"
+        "            os.environ[\"PROJECT_ROOT\"] = str(resolved.parents[4])\n"
+        "            return\n\n"
+        "    os.environ[\"PROJECT_ROOT\"] = str(Path(__file__).resolve().parents[3])\n\n\n"
+        "def compose_train_config(config_arg: str):\n"
         "    config_path = Path(config_arg)\n"
         "    if config_path.suffix in {\".yaml\", \".yml\"} and config_path.exists():\n"
+        "        _ensure_project_root_env(config_path)\n"
         "        with initialize_config_dir(\n"
         "            config_dir=str(config_path.parent.resolve()), version_base=\"1.2\"\n"
         "        ):\n"
         "            return compose(config_name=config_path.name)\n\n"
+        "    _ensure_project_root_env()\n"
         "    with initialize_config_module(\"sam3.train\", version_base=\"1.2\"):\n"
         "        return compose(config_name=config_arg)\n\n\n"
         "def main(args) -> None:\n"
@@ -227,7 +239,7 @@ target_dir.mkdir(parents=True, exist_ok=True)
 
 for template_path in sorted(template_dir.glob("*.yaml.template")):
     rendered_text = template_path.read_text(encoding="utf-8").replace(
-        "__PROJECT_ROOT__", str(project_root)
+        "__PROJECT_ROOT__", "${oc.env:PROJECT_ROOT}"
     )
     target_path = target_dir / template_path.name.replace(".template", "")
     target_path.write_text(rendered_text, encoding="utf-8")
@@ -250,18 +262,28 @@ log "Installing dataset-generation and COCO tooling."
   scipy
 
 log "Running an import smoke test."
-"${PYTHON}" - <<'PY'
+(cd "${PROJECT_ROOT}/sam3" && "${PYTHON}" - <<'PY')
+from importlib import metadata
+
 import cv2
 import matplotlib
 import pycocotools.mask
 import sam3
 import torch
 
+sam3_version = getattr(sam3, "__version__", None)
+if sam3_version is None:
+    try:
+        sam3_version = metadata.version("sam3")
+    except Exception:
+        sam3_version = "unknown"
+
 print("torch:", torch.__version__)
 print("cuda_available:", torch.cuda.is_available())
 print("opencv:", cv2.__version__)
 print("matplotlib:", matplotlib.__version__)
-print("sam3:", sam3.__version__)
+print("sam3 module:", getattr(sam3, "__file__", "unknown"))
+print("sam3 version:", sam3_version)
 PY
 
 generate_jittered_bar_dataset() {
@@ -294,4 +316,4 @@ fi
 log "Bootstrap complete."
 log "Activate the environment with: source ${VENV_DIR}/bin/activate"
 log "Next step: ${PYTHON} ${PROJECT_ROOT}/scripts/download_sam3_checkpoint.py --token YOUR_HF_TOKEN --validate --validate-config chart_dataset_ft.yaml"
-log "Training entrypoint: cd ${PROJECT_ROOT}/sam3 && python sam3/train/train.py -c train/configs/roboflow_v100/chart_dataset_ft.yaml --use-cluster 0 --num-gpus 1"
+log "Training entrypoint: cd ${PROJECT_ROOT}/sam3 && python -m sam3.train.train -c train/configs/roboflow_v100/chart_dataset_ft.yaml --use-cluster 0 --num-gpus 1"

@@ -3,10 +3,10 @@ defaults:
   - _self_
 
 paths:
-  dataset_root: __PROJECT_ROOT__/chart_dataset
-  experiment_log_dir: __PROJECT_ROOT__/sam3_runs/chart_dataset_ft
-  checkpoint_path: __PROJECT_ROOT__/sam3/checkpoints/sam3.pt
-  bpe_path: __PROJECT_ROOT__/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz
+  dataset_root: ${oc.env:PROJECT_ROOT}/chart_dataset
+  experiment_log_dir: ${oc.env:PROJECT_ROOT}/sam3_runs/chart_dataset_ft
+  checkpoint_path: ${oc.env:PROJECT_ROOT}/sam3/checkpoints/sam3.pt
+  bpe_path: ${oc.env:PROJECT_ROOT}/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz
 
 custom_dataset:
   train_transforms:
@@ -103,7 +103,7 @@ custom_dataset:
 
 scratch:
   enable_segmentation: true
-  resolution: 640
+  resolution: 1008
   consistent_transform: false
   max_ann_per_img: 2000
   max_train_queries: 128
@@ -213,7 +213,7 @@ trainer:
         _target_: sam3.train.data.collator.collate_fn_api
         _partial_: true
         repeats: 1
-        dict_key: custom
+        dict_key: all
         with_seg_masks: ${scratch.enable_segmentation}
 
   model:

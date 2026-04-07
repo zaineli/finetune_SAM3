@@ -14,6 +14,9 @@ from huggingface_hub.utils import GatedRepoError, HfHubHTTPError, RepositoryNotF
 
 DEFAULT_REPO_ID = "facebook/sam3"
 DEFAULT_FILENAME = "sam3.pt"
+DEFAULT_IMAGE_RESOLUTION = 1008
+LEGACY_PROJECT_ROOT_PLACEHOLDER = "__PROJECT_ROOT__"
+PROJECT_ROOT_EXPR = "${oc.env:PROJECT_ROOT}"
 DEFAULT_VALIDATE_CONFIGS = (
     "chart_dataset_ft.yaml",
     "volcano_dataset_ft.yaml",
@@ -82,6 +85,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _normalize_config_text(text: str) -> str:
+    return text.replace(LEGACY_PROJECT_ROOT_PLACEHOLDER, PROJECT_ROOT_EXPR)
+
+
+def sync_local_train_configs(project_root: Path) -> None:
+    template_dir = project_root / "sam3_config_templates" / "roboflow_v100"
+    target_dir = project_root / "sam3" / "train" / "configs" / "roboflow_v100"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    for template_path in sorted(template_dir.glob("*.yaml.template")):
+        rendered_text = _normalize_config_text(template_path.read_text(encoding="utf-8"))
+        target_path = target_dir / template_path.name.replace(".template", "")
+        current_text = target_path.read_text(encoding="utf-8") if target_path.exists() else None
+        if current_text != rendered_text:
+            target_path.write_text(rendered_text, encoding="utf-8")
+            print(f"Synced config from template: {target_path}")
+
+    for target_path in sorted(target_dir.glob("*.yaml")):
+        current_text = target_path.read_text(encoding="utf-8")
+        normalized_text = _normalize_config_text(current_text)
+        if normalized_text != current_text:
+            target_path.write_text(normalized_text, encoding="utf-8")
+            print(f"Repaired legacy PROJECT_ROOT placeholder in: {target_path}")
+
+
 def validate_local_setup(project_root: Path, config_names: tuple[str, ...]) -> None:
     import torch
     from hydra.utils import instantiate
@@ -89,6 +117,8 @@ def validate_local_setup(project_root: Path, config_names: tuple[str, ...]) -> N
     from sam3.model.utils.misc import copy_data_to_device
     from sam3.train.train import compose_train_config
 
+    os.environ.setdefault("PROJECT_ROOT", str(project_root.resolve()))
+    sync_local_train_configs(project_root)
     config_dir = project_root / "sam3" / "train" / "configs" / "roboflow_v100"
     if not config_names:
         raise ValueError("At least one config must be provided for validation.")
@@ -98,6 +128,13 @@ def validate_local_setup(project_root: Path, config_names: tuple[str, ...]) -> N
         if not config_path.exists():
             raise FileNotFoundError(f"Missing config: {config_path}")
         cfg = compose_train_config(str(config_path))
+        resolution = int(cfg.scratch.resolution)
+        if resolution != DEFAULT_IMAGE_RESOLUTION:
+            raise ValueError(
+                f"{config_name} uses scratch.resolution={resolution}, but the current SAM3 "
+                f"image builder is hard-wired to {DEFAULT_IMAGE_RESOLUTION}. Update the config "
+                "before training or validation."
+            )
         dataset = instantiate(cfg.trainer.data.train.dataset, _convert_="all")
         collate = instantiate(cfg.trainer.data.train.collate_fn, _convert_="all")
         sample = dataset[0]
@@ -110,6 +147,14 @@ def validate_local_setup(project_root: Path, config_names: tuple[str, ...]) -> N
     smoke_cfg = compose_train_config(str(config_dir / smoke_config_name))
     model = instantiate(smoke_cfg.trainer.model, _convert_="all")
     loss_fn = instantiate(smoke_cfg.trainer.loss.all, _convert_="all")
+    dist_is_ready = torch.distributed.is_available() and torch.distributed.is_initialized()
+    original_normalization = getattr(loss_fn, "normalization", None)
+    if not dist_is_ready and original_normalization == "global":
+        loss_fn.normalization = "local"
+        print(
+            "Validator note: overriding Sam3LossWrapper normalization from global to local "
+            "for this single-process smoke test."
+        )
     dataset = instantiate(smoke_cfg.trainer.data.train.dataset, _convert_="all")
     collate = instantiate(smoke_cfg.trainer.data.train.collate_fn, _convert_="all")
     batch = collate([dataset[0]])["all"]
@@ -124,10 +169,21 @@ def validate_local_setup(project_root: Path, config_names: tuple[str, ...]) -> N
         if device.type == "cuda"
         else contextlib.nullcontext()
     )
-    with autocast_context:
-        find_stages = model(batch)
-        find_targets = [model.back_convert(x) for x in batch.find_targets]
-        loss_dict = loss_fn(find_stages, find_targets)
+    try:
+        with autocast_context:
+            find_stages = model(batch)
+            find_targets = [model.back_convert(x) for x in batch.find_targets]
+            loss_dict = loss_fn(find_stages, find_targets)
+    except AssertionError as error:
+        batch_shape = tuple(batch.img_batch.shape)
+        raise RuntimeError(
+            "SAM3 smoke validation failed during the vision forward pass. "
+            f"Batch tensor shape was {batch_shape}. The most common cause here is an image "
+            f"resolution mismatch: this pipeline expects {DEFAULT_IMAGE_RESOLUTION}x{DEFAULT_IMAGE_RESOLUTION} inputs."
+        ) from error
+    finally:
+        if original_normalization is not None:
+            loss_fn.normalization = original_normalization
 
     core_loss = loss_dict["core_loss"]
     if not torch.isfinite(core_loss):
@@ -178,6 +234,9 @@ def main() -> int:
     args = parse_args()
     token = args.token or os.environ.get("HF_TOKEN")
     validate_configs = tuple(args.validate_configs or DEFAULT_VALIDATE_CONFIGS)
+    project_root = Path(__file__).resolve().parents[1]
+    os.environ.setdefault("PROJECT_ROOT", str(project_root))
+    sync_local_train_configs(project_root)
     if not token:
         print(
             "Missing Hugging Face token. Pass --token or set HF_TOKEN in the environment.",
@@ -209,7 +268,6 @@ def main() -> int:
             print(f"Downloaded config to: {config_path}")
 
         if args.validate:
-            project_root = Path(__file__).resolve().parents[1]
             validate_local_setup(project_root, validate_configs)
     except GatedRepoError as error:
         print(
