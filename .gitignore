@@ -5,6 +5,7 @@ __pycache__/
 *_dataset_preview/
 dataset_preview/
 sam3_runs/
+sam/
 
 
 # Node artifact files
