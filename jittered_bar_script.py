@@ -299,10 +299,107 @@ SCIENTIFIC_PAIR_PALETTES = [
     ["#6ecf5d", "#3096ea"],
 ]
 
+SCIENTIFIC_OBJECT_TEST_METRICS = [
+    {
+        "titles": ["OLT testing", "Novel object recognition", "Object exploration"],
+        "value_label": "% Exploration",
+        "value_range": (0.0, 100.0),
+    },
+    {
+        "titles": ["Recognition memory", "Displaced object exploration", "Object memory task"],
+        "value_label": "% Exploration",
+        "value_range": (0.0, 100.0),
+    },
+]
+
+SCIENTIFIC_OBJECT_TEST_GROUPS = [
+    ["WT", "WT\neGFP", "WT\nhPGC1α", "APP23\neGFP", "APP23\nhPGC1α"],
+    ["WT", "WT\nVector", "WT\nhPGC1α", "APP23\nVector", "APP23\nhPGC1α"],
+    ["WT", "WT\nVehicle", "WT\nDrug", "APP23\nVehicle", "APP23\nDrug"],
+]
+
+SCIENTIFIC_OBJECT_TEST_CATEGORY_LABELS = [
+    ["Obj A", "Obj B\n(displaced)"],
+    ["Object A", "Object B\n(displaced)"],
+    ["Familiar", "Novel\n(displaced)"],
+]
+
+SCIENTIFIC_SEX_METRICS = [
+    {
+        "titles": ["Hippocampal volume", "Hippocampal size", "Dentate gyrus volume"],
+        "value_label": "Hippocampal volume (mm³)",
+        "value_range": (0.0, 15.0),
+    },
+    {
+        "titles": ["Cortical thickness", "Cortical volume", "Parenchymal volume"],
+        "value_label": "Normalized volume",
+        "value_range": (0.0, 12.0),
+    },
+    {
+        "titles": ["Area fraction", "Signal coverage", "Marker-positive fraction"],
+        "value_label": "Area fraction (%)",
+        "value_range": (0.0, 14.0),
+    },
+]
+
+SCIENTIFIC_SEX_CATEGORY_LABELS = [
+    ["Control", "Treatment"],
+    ["Vehicle", "Drug"],
+    ["WT", "APP23"],
+]
+
+SCIENTIFIC_TOXICANT_METRICS = [
+    {
+        "titles": ["hAbeta40", "hAbeta42", "Aβ signal"],
+        "value_label": "Intensity (a.u.)",
+        "value_range": (0.0, 8000.0),
+    },
+    {
+        "titles": ["Amyloid burden", "Plaque-associated signal", "Aβ concentration"],
+        "value_label": "Signal (a.u.)",
+        "value_range": (0.0, 7000.0),
+    },
+]
+
+SCIENTIFIC_TOXICANT_GROUP_LABELS = [
+    ["B6", "hAhA"],
+    ["WT", "Tg"],
+    ["C57BL/6J", "Humanized"],
+]
+
+SCIENTIFIC_TOXICANT_CATEGORY_LABELS = [
+    ["Untreated", "Arsenic", "Cadmium", "Lead", "Mix"],
+    ["Control", "Arsenic", "Cadmium", "Lead", "Mixture"],
+]
+
+SCIENTIFIC_VARIANT_CYCLE = [
+    "paired",
+    "grouped_pair",
+    "age_block",
+    "sex_pair",
+    "toxicant_multi",
+]
+
+PLOT_BLUEPRINT_CYCLE = [
+    ("scientific", "paired"),
+    ("scientific", "grouped_pair"),
+    ("scientific", "age_block"),
+    ("scientific", "sex_pair"),
+    ("scientific", "toxicant_multi"),
+    ("classic", None),
+    ("scientific", "paired"),
+    ("classic", None),
+]
+
 
 def darken_color(color, amount: float = 0.35):
     rgb = np.array(plt.matplotlib.colors.to_rgb(color), dtype=float)
     return tuple(np.clip(rgb * (1.0 - amount), 0.0, 1.0))
+
+
+def lighten_color(color, amount: float = 0.45):
+    rgb = np.array(plt.matplotlib.colors.to_rgb(color), dtype=float)
+    return tuple(np.clip(rgb + (1.0 - rgb) * amount, 0.0, 1.0))
 
 
 def choose_palette(num_categories: int, color_mode: str):
@@ -427,6 +524,14 @@ def choose_plot_family():
     return random.choices(["scientific", "classic"], weights=[0.68, 0.32], k=1)[0]
 
 
+def choose_plot_blueprint(seed: int):
+    return PLOT_BLUEPRINT_CYCLE[seed % len(PLOT_BLUEPRINT_CYCLE)]
+
+
+def choose_scientific_variant(seed: int):
+    return SCIENTIFIC_VARIANT_CYCLE[seed % len(SCIENTIFIC_VARIANT_CYCLE)]
+
+
 def generate_scientific_samples(target_mean: float, sample_count: int, value_span: float):
     dispersion = max(value_span * random.uniform(0.025, 0.08), target_mean * random.uniform(0.08, 0.22))
     distribution = random.choices(
@@ -453,6 +558,61 @@ def generate_scientific_samples(target_mean: float, sample_count: int, value_spa
         values[extreme_idx] += dispersion * random.uniform(1.0, 2.2)
 
     return np.clip(values, 0.0, None)
+
+
+def summarize_slot_samples(slot_samples, num_groups: int, num_categories: int, value_span: float):
+    means = np.zeros((num_groups, num_categories), dtype=float)
+    stds = np.zeros((num_groups, num_categories), dtype=float)
+
+    slot_idx = 0
+    for group_idx in range(num_groups):
+        for category_idx in range(num_categories):
+            samples = slot_samples[slot_idx]
+            means[group_idx, category_idx] = float(samples.mean())
+            stds[group_idx, category_idx] = (
+                float(samples.std(ddof=1) / np.sqrt(len(samples)))
+                if len(samples) > 1
+                else value_span * 0.03
+            )
+            slot_idx += 1
+
+    return means, stds
+
+
+def build_scientific_dot_positions(slot_samples, group_positions, bar_offsets, bar_width, jitter_scale=(0.18, 0.28)):
+    jitter_amount = min(0.19, bar_width * random.uniform(*jitter_scale))
+    dot_xs = []
+    dot_ys = []
+    slot_idx = 0
+
+    for group_idx in range(len(group_positions)):
+        for category_idx in range(len(bar_offsets)):
+            position = group_positions[group_idx] + bar_offsets[category_idx]
+            samples = slot_samples[slot_idx]
+            dot_xs.append(position + np.random.uniform(-jitter_amount, jitter_amount, len(samples)))
+            dot_ys.append(samples)
+            slot_idx += 1
+
+    return dot_xs, dot_ys
+
+
+def build_group_pair_targets(base_levels, deltas, value_min, value_max):
+    targets = np.stack([base_levels, base_levels + deltas], axis=1)
+    return np.clip(targets, value_min * 0.6, value_max * 0.98)
+
+
+def build_slot_samples_from_targets(targets, sample_counts, value_span: float):
+    slot_samples = []
+    num_groups, num_categories = targets.shape
+    for group_idx in range(num_groups):
+        for category_idx in range(num_categories):
+            samples = generate_scientific_samples(
+                float(targets[group_idx, category_idx]),
+                int(sample_counts[group_idx, category_idx]),
+                value_span,
+            )
+            slot_samples.append(samples)
+    return slot_samples
 
 
 def choose_significance_label(effect_ratio: float):
@@ -524,7 +684,15 @@ def build_scientific_dot_style(slot_facecolors, slot_edgecolors, num_groups: int
     return dot_variant, dot_facecolors, dot_edgecolors, dot_linewidths
 
 
-def build_scientific_brackets(means, stds, dot_values_by_slot, group_positions, bar_offsets, max_value):
+def build_scientific_brackets(
+    means,
+    stds,
+    dot_values_by_slot,
+    group_positions,
+    bar_offsets,
+    max_value,
+    group_indices=None,
+):
     if len(group_positions) < 1:
         return []
 
@@ -557,7 +725,8 @@ def build_scientific_brackets(means, stds, dot_values_by_slot, group_positions, 
         return brackets
 
     if means.shape[1] == 2:
-        for group_idx in range(len(group_positions)):
+        candidate_groups = list(group_indices) if group_indices is not None else list(range(len(group_positions)))
+        for group_idx in candidate_groups:
             left_slot = group_idx * 2
             right_slot = left_slot + 1
             slot_max = max(
@@ -586,29 +755,336 @@ def build_scientific_brackets(means, stds, dot_values_by_slot, group_positions, 
     return brackets
 
 
-def generate_scientific_data(seed: int):
+def generate_scientific_data(seed: int, variant: str | None = None):
     random.seed(seed)
     np.random.seed(seed)
 
-    metric = random.choice(SCIENTIFIC_METRICS)
-    chart_variant = random.choices(["paired", "grouped_pair"], weights=[0.62, 0.38], k=1)[0]
+    scientific_variant = variant or choose_scientific_variant(seed)
     orientation = "vertical"
     has_errorbars = True
     color_mode = "scientific"
-    title = random.choice(metric["titles"])
-    value_min, value_max = metric["value_range"]
-    value_span = value_max - value_min
+    group_axis_label = ""
+    show_legend = False
+    legend_config = no_legend_config()
+    legend_title = None
+    panel_label = None
+    bottom_blocks = []
+    title_enabled = True
+    title_fontsize = random.uniform(13.0, 15.5)
+    tick_labelsize = random.uniform(9.5, 11.5)
+    label_fontsize = random.uniform(11.0, 13.0)
+    spine_linewidth = random.uniform(1.55, 2.1)
+    tick_length = random.uniform(5.0, 7.5)
+    tick_width = random.uniform(1.2, 1.6)
+    layout_left = random.uniform(0.15, 0.19)
+    layout_bottom = random.uniform(0.17, 0.22)
+    layout_top = random.uniform(0.84, 0.9)
+    layout_right = 0.98
+    marker_size = random.uniform(24.0, 44.0)
+    marker_alpha = 0.95
+    bar_alpha = random.uniform(0.72, 0.88)
+    edge_linewidth = random.uniform(1.4, 1.9)
+    x_tick_rotation = random.choice([0, 0, 0, 28, 40])
+    explicit_max_value = None
 
-    if chart_variant == "paired":
+    if scientific_variant == "paired":
+        metric = random.choice(SCIENTIFIC_METRICS)
+        title = random.choice(metric["titles"])
+        value_min, value_max = metric["value_range"]
+        value_span = value_max - value_min
         num_groups = 2
         num_categories = 1
         group_labels = random.choice(SCIENTIFIC_PAIR_LABELS)
         cat_labels = [""]
-    else:
+        colors, slot_facecolors, slot_edgecolors = build_scientific_slot_colors(num_groups, num_categories)
+        dot_variant, dot_facecolors, dot_edgecolors, dot_linewidths = build_scientific_dot_style(
+            slot_facecolors,
+            slot_edgecolors,
+            num_groups,
+            num_categories,
+        )
+
+        sample_counts = np.random.randint(4, 11, size=(num_groups, num_categories))
+        base_level = random.uniform(value_min + value_span * 0.12, value_max - value_span * 0.35)
+        delta = value_span * random.uniform(0.08, 0.34)
+        direction = random.choice([-1.0, 1.0])
+        target_means = [base_level, np.clip(base_level + direction * delta, value_min * 0.6, value_max * 0.98)]
+        if abs(target_means[1] - target_means[0]) < value_span * 0.08:
+            target_means[1] = np.clip(
+                target_means[0] + value_span * random.uniform(0.1, 0.22),
+                value_min * 0.6,
+                value_max * 0.98,
+            )
+
+        targets = np.array(target_means, dtype=float).reshape(num_groups, num_categories)
+        slot_samples = build_slot_samples_from_targets(targets, sample_counts, value_span)
+        means, stds = summarize_slot_samples(slot_samples, num_groups, num_categories, value_span)
+        sig_brackets = build_scientific_brackets(
+            means,
+            stds,
+            slot_samples,
+            np.arange(num_groups, dtype=float),
+            np.array([0.0], dtype=float),
+            float(max(means.max(), value_max)),
+        )
+        show_legend = False
+
+    elif scientific_variant == "grouped_pair":
+        metric = random.choice(SCIENTIFIC_METRICS)
+        title = random.choice(metric["titles"])
+        value_min, value_max = metric["value_range"]
+        value_span = value_max - value_min
         num_groups = 2
         num_categories = 2
         group_labels = random.choice(SCIENTIFIC_GROUP_LABELS)
         cat_labels = random.choice(SCIENTIFIC_CATEGORY_LABELS)
+        colors, slot_facecolors, slot_edgecolors = build_scientific_slot_colors(num_groups, num_categories)
+        dot_variant, dot_facecolors, dot_edgecolors, dot_linewidths = build_scientific_dot_style(
+            slot_facecolors,
+            slot_edgecolors,
+            num_groups,
+            num_categories,
+        )
+
+        sample_counts = np.random.randint(4, 11, size=(num_groups, num_categories))
+        base_levels = np.random.uniform(value_min + value_span * 0.12, value_max - value_span * 0.45, size=num_groups)
+        treatment_shift = value_span * random.uniform(0.06, 0.22)
+        if random.random() < 0.25:
+            treatment_shift *= -1.0
+
+        targets = np.zeros((num_groups, num_categories), dtype=float)
+        for group_idx in range(num_groups):
+            group_shift = value_span * random.uniform(-0.08, 0.08)
+            targets[group_idx, 0] = np.clip(base_levels[group_idx] + group_shift, value_min * 0.6, value_max * 0.95)
+            targets[group_idx, 1] = np.clip(
+                base_levels[group_idx] + group_shift + treatment_shift * random.uniform(0.75, 1.2),
+                value_min * 0.6,
+                value_max * 0.98,
+            )
+
+        slot_samples = build_slot_samples_from_targets(targets, sample_counts, value_span)
+        means, stds = summarize_slot_samples(slot_samples, num_groups, num_categories, value_span)
+        sig_brackets = build_scientific_brackets(
+            means,
+            stds,
+            slot_samples,
+            np.arange(num_groups, dtype=float),
+            np.array([-0.185, 0.185], dtype=float),
+            float(max(means.max(), value_max)),
+        )
+        show_legend = num_categories > 1 and random.random() < 0.1
+        legend_config = choose_legend_config(num_categories) if show_legend else no_legend_config()
+
+    elif scientific_variant == "age_block":
+        metric = random.choice(SCIENTIFIC_OBJECT_TEST_METRICS)
+        title = random.choice(metric["titles"])
+        value_min, value_max = metric["value_range"]
+        value_span = value_max - value_min
+        num_groups = 5
+        num_categories = 2
+        group_labels = random.choice(SCIENTIFIC_OBJECT_TEST_GROUPS)
+        cat_labels = random.choice(SCIENTIFIC_OBJECT_TEST_CATEGORY_LABELS)
+        colors = [
+            plt.matplotlib.colors.to_rgb("#ffffff"),
+            plt.matplotlib.colors.to_rgb(random.choice(["#4051d4", "#3046d7", "#4a57d8", "#3048c8"])),
+        ]
+        slot_facecolors = [[colors[0], colors[1]] for _ in range(num_groups)]
+        slot_edgecolors = [[(0.08, 0.08, 0.08), darken_color(colors[1], 0.22)] for _ in range(num_groups)]
+        dot_variant = "filled_black"
+        dot_facecolors = ["#111111" for _ in range(num_groups * num_categories)]
+        dot_edgecolors = ["#111111" for _ in range(num_groups * num_categories)]
+        dot_linewidths = [0.75 for _ in range(num_groups * num_categories)]
+        sample_counts = np.random.randint(6, 12, size=(num_groups, num_categories))
+
+        base_levels = np.array(
+            [
+                random.uniform(30.0, 44.0),
+                random.uniform(39.0, 50.0),
+                random.uniform(36.0, 48.0),
+                random.uniform(40.0, 53.0),
+                random.uniform(42.0, 55.0),
+            ],
+            dtype=float,
+        )
+        displaced_deltas = np.array(
+            [
+                random.uniform(16.0, 28.0),
+                random.uniform(5.0, 12.0),
+                random.uniform(10.0, 22.0),
+                random.uniform(8.0, 18.0),
+                random.uniform(3.0, 11.0),
+            ],
+            dtype=float,
+        )
+        if random.random() < 0.5:
+            displaced_deltas[3] += random.uniform(3.0, 7.0)
+        if random.random() < 0.35:
+            displaced_deltas[4] *= random.uniform(0.55, 0.9)
+
+        targets = build_group_pair_targets(base_levels, displaced_deltas, value_min, value_max)
+        slot_samples = build_slot_samples_from_targets(targets, sample_counts, value_span)
+        means, stds = summarize_slot_samples(slot_samples, num_groups, num_categories, value_span)
+        sig_group_count = random.choice([1, 2, 2])
+        candidate_groups = [0, 2, 3, 4]
+        sig_groups = sorted(random.sample(candidate_groups, k=min(sig_group_count, len(candidate_groups))))
+        sig_brackets = build_scientific_brackets(
+            means,
+            stds,
+            slot_samples,
+            np.arange(num_groups, dtype=float),
+            np.array([-0.185, 0.185], dtype=float),
+            float(max(means.max(), value_max)),
+            group_indices=sig_groups,
+        )
+        show_legend = True
+        legend_config = {
+            "family": "right_outside",
+            "loc": "upper left",
+            "bbox_to_anchor": (1.01, 1.0),
+            "ncol": 1,
+        }
+        panel_label = {
+            "text": random.choice(["A", "B", "C"]),
+            "x": -0.16,
+            "y": 1.05,
+            "fontsize": 26,
+            "fontweight": "bold",
+        }
+        bottom_blocks = [
+            {
+                "start_idx": 0,
+                "end_idx": 0,
+                "label": random.choice(["12 months\nold", "12-month\ncohort"]),
+                "line_y": -0.2,
+                "text_y": -0.26,
+            },
+            {
+                "start_idx": 1,
+                "end_idx": 4,
+                "label": random.choice(["15 months old", "15-month cohort"]),
+                "line_y": -0.2,
+                "text_y": -0.26,
+            },
+        ]
+        title_fontsize = random.uniform(18.0, 20.5)
+        tick_labelsize = random.uniform(10.5, 12.0)
+        label_fontsize = random.uniform(12.0, 13.6)
+        marker_size = random.uniform(28.0, 38.0)
+        bar_alpha = random.uniform(0.93, 0.98)
+        edge_linewidth = random.uniform(1.7, 2.05)
+        layout_left = random.uniform(0.11, 0.14)
+        layout_bottom = random.uniform(0.28, 0.32)
+        layout_top = random.uniform(0.82, 0.87)
+        layout_right = random.uniform(0.8, 0.85)
+        x_tick_rotation = 0
+        explicit_max_value = max(90.0, float(means.max() + value_span * 0.15))
+
+    elif scientific_variant == "sex_pair":
+        metric = random.choice(SCIENTIFIC_SEX_METRICS)
+        title = random.choice(metric["titles"])
+        value_min, value_max = metric["value_range"]
+        value_span = value_max - value_min
+        num_groups = 2
+        num_categories = 2
+        group_labels = ["Male", "Female"]
+        cat_labels = random.choice(SCIENTIFIC_SEX_CATEGORY_LABELS)
+        colors = [
+            plt.matplotlib.colors.to_rgb(random.choice(["#9a9a9a", "#a6a6a6", "#8d8d8d"])),
+            plt.matplotlib.colors.to_rgb(random.choice(["#f1b36b", "#e8a54b", "#edb76f"])),
+        ]
+        slot_facecolors = [[colors[0], colors[1]] for _ in range(num_groups)]
+        slot_edgecolors = [[darken_color(colors[0], 0.24), darken_color(colors[1], 0.2)] for _ in range(num_groups)]
+        dot_variant = "hollow_color"
+        dot_facecolors = ["white" for _ in range(num_groups * num_categories)]
+        dot_edgecolors = [slot_edgecolors[group_idx][category_idx] for group_idx in range(num_groups) for category_idx in range(num_categories)]
+        dot_linewidths = [1.0 for _ in range(num_groups * num_categories)]
+        sample_counts = np.random.randint(7, 14, size=(num_groups, num_categories))
+
+        base_levels = np.random.uniform(value_max * 0.42, value_max * 0.6, size=num_groups)
+        treatment_drop = np.random.uniform(value_span * 0.1, value_span * 0.24, size=num_groups)
+        targets = build_group_pair_targets(base_levels, -treatment_drop, value_min, value_max)
+        slot_samples = build_slot_samples_from_targets(targets, sample_counts, value_span)
+        means, stds = summarize_slot_samples(slot_samples, num_groups, num_categories, value_span)
+        sig_brackets = build_scientific_brackets(
+            means,
+            stds,
+            slot_samples,
+            np.arange(num_groups, dtype=float),
+            np.array([-0.185, 0.185], dtype=float),
+            float(max(means.max(), value_max)),
+            group_indices=[0, 1],
+        )
+        show_legend = False
+        title_enabled = random.random() < 0.45
+        title_fontsize = random.uniform(14.0, 16.5)
+        marker_size = random.uniform(22.0, 30.0)
+        bar_alpha = random.uniform(0.9, 0.96)
+        edge_linewidth = random.uniform(1.55, 1.9)
+        x_tick_rotation = 0
+        explicit_max_value = max(value_max * 0.9, float(means.max() + value_span * 0.18))
+
+    else:
+        metric = random.choice(SCIENTIFIC_TOXICANT_METRICS)
+        title = random.choice(metric["titles"])
+        value_min, value_max = metric["value_range"]
+        value_span = value_max - value_min
+        num_groups = 2
+        num_categories = 5
+        group_labels = random.choice(SCIENTIFIC_TOXICANT_GROUP_LABELS)
+        cat_labels = random.choice(SCIENTIFIC_TOXICANT_CATEGORY_LABELS)
+        colors = [
+            plt.matplotlib.colors.to_rgb("#ffffff"),
+            plt.matplotlib.colors.to_rgb("#ff1f1f"),
+            plt.matplotlib.colors.to_rgb("#1d1df1"),
+            plt.matplotlib.colors.to_rgb("#1d8d0a"),
+            plt.matplotlib.colors.to_rgb("#6f6f6f"),
+        ]
+        slot_facecolors = [[colors[category_idx] for category_idx in range(num_categories)] for _ in range(num_groups)]
+        slot_edgecolors = [
+            [
+                (0.08, 0.08, 0.08) if category_idx == 0 else darken_color(colors[category_idx], 0.18)
+                for category_idx in range(num_categories)
+            ]
+            for _ in range(num_groups)
+        ]
+        dot_variant = "filled_black"
+        dot_facecolors = ["#111111" for _ in range(num_groups * num_categories)]
+        dot_edgecolors = ["#111111" for _ in range(num_groups * num_categories)]
+        dot_linewidths = [0.7 for _ in range(num_groups * num_categories)]
+        sample_counts = np.random.randint(4, 9, size=(num_groups, num_categories))
+
+        low_signal = np.random.uniform(0.0, value_max * 0.004, size=num_categories)
+        high_signal = np.random.uniform(value_max * 0.35, value_max * 0.62, size=num_categories)
+        high_signal += np.linspace(-0.08, 0.08, num_categories) * value_max * 0.18
+        if random.random() < 0.45:
+            high_signal = np.sort(high_signal)
+        else:
+            np.random.shuffle(high_signal)
+
+        targets = np.vstack([low_signal, high_signal])
+        targets = np.clip(targets, value_min, value_max * 0.92)
+        slot_samples = build_slot_samples_from_targets(targets, sample_counts, value_span)
+        means, stds = summarize_slot_samples(slot_samples, num_groups, num_categories, value_span)
+        sig_brackets = []
+        show_legend = True
+        legend_config = {
+            "family": "left_outside",
+            "loc": "upper left",
+            "bbox_to_anchor": (-0.42, 1.0),
+            "ncol": 1,
+        }
+        title_fontsize = random.uniform(16.5, 19.0)
+        tick_labelsize = random.uniform(10.5, 12.0)
+        label_fontsize = random.uniform(11.5, 13.0)
+        marker_size = random.uniform(18.0, 28.0)
+        bar_alpha = random.uniform(0.94, 0.99)
+        edge_linewidth = random.uniform(1.55, 1.9)
+        layout_left = random.uniform(0.3, 0.36)
+        layout_bottom = random.uniform(0.18, 0.23)
+        layout_top = random.uniform(0.83, 0.88)
+        layout_right = 0.98
+        x_tick_rotation = random.choice([35, 40, 45])
+        explicit_max_value = float(max(random.choice([6000.0, 7000.0, 8000.0]), means.max() * 1.12))
 
     group_positions = np.arange(num_groups, dtype=float)
     bar_span = 0.74
@@ -619,72 +1095,25 @@ def generate_scientific_data(seed: int):
         num_categories,
     )
 
-    colors, slot_facecolors, slot_edgecolors = build_scientific_slot_colors(num_groups, num_categories)
-    dot_variant, dot_facecolors, dot_edgecolors, dot_linewidths = build_scientific_dot_style(
-        slot_facecolors,
-        slot_edgecolors,
-        num_groups,
-        num_categories,
+    dot_xs, dot_ys = build_scientific_dot_positions(
+        slot_samples,
+        group_positions,
+        bar_offsets,
+        bar_width,
+        jitter_scale=(0.15, 0.24) if scientific_variant == "toxicant_multi" else (0.18, 0.28),
     )
-
-    sample_counts = np.random.randint(4, 11, size=(num_groups, num_categories))
-    slot_samples = []
-    means = np.zeros((num_groups, num_categories), dtype=float)
-    stds = np.zeros((num_groups, num_categories), dtype=float)
-
-    if chart_variant == "paired":
-        base_level = random.uniform(value_min + value_span * 0.12, value_max - value_span * 0.35)
-        delta = value_span * random.uniform(0.08, 0.34)
-        direction = random.choice([-1.0, 1.0])
-        target_means = [base_level, np.clip(base_level + direction * delta, value_min * 0.6, value_max * 0.98)]
-        if abs(target_means[1] - target_means[0]) < value_span * 0.08:
-            target_means[1] = np.clip(target_means[0] + value_span * random.uniform(0.1, 0.22), value_min * 0.6, value_max * 0.98)
-
-        for group_idx in range(num_groups):
-            samples = generate_scientific_samples(target_means[group_idx], int(sample_counts[group_idx, 0]), value_span)
-            slot_samples.append(samples)
-            means[group_idx, 0] = float(samples.mean())
-            stds[group_idx, 0] = float(samples.std(ddof=1) / np.sqrt(len(samples))) if len(samples) > 1 else value_span * 0.03
-    else:
-        base_levels = np.random.uniform(value_min + value_span * 0.12, value_max - value_span * 0.45, size=num_groups)
-        treatment_shift = value_span * random.uniform(0.06, 0.22)
-        if random.random() < 0.25:
-            treatment_shift *= -1.0
-
-        for group_idx in range(num_groups):
-            group_shift = value_span * random.uniform(-0.08, 0.08)
-            targets = [
-                np.clip(base_levels[group_idx] + group_shift, value_min * 0.6, value_max * 0.95),
-                np.clip(base_levels[group_idx] + group_shift + treatment_shift * random.uniform(0.75, 1.2), value_min * 0.6, value_max * 0.98),
-            ]
-            for category_idx in range(num_categories):
-                samples = generate_scientific_samples(targets[category_idx], int(sample_counts[group_idx, category_idx]), value_span)
-                slot_samples.append(samples)
-                means[group_idx, category_idx] = float(samples.mean())
-                stds[group_idx, category_idx] = float(samples.std(ddof=1) / np.sqrt(len(samples))) if len(samples) > 1 else value_span * 0.03
-
-    jitter_amount = min(0.19, bar_width * random.uniform(0.18, 0.28))
-    dot_xs = []
-    dot_ys = []
-    slot_idx = 0
-    for group_idx in range(num_groups):
-        for category_idx in range(num_categories):
-            position = group_positions[group_idx] + bar_offsets[category_idx]
-            samples = slot_samples[slot_idx]
-            dot_xs.append(position + np.random.uniform(-jitter_amount, jitter_amount, len(samples)))
-            dot_ys.append(samples)
-            slot_idx += 1
-
-    sig_brackets = build_scientific_brackets(means, stds, slot_samples, group_positions, bar_offsets, float(max(means.max(), value_max)))
     max_dot_value = max((float(values.max()) for values in dot_ys if values.size > 0), default=0.0)
-    sig_top = max((bracket["y"] + bracket["text_offset"] + value_span * 0.03 for bracket in sig_brackets), default=0.0)
-    max_value = float(max(means.max(), max_dot_value, sig_top) + value_span * random.uniform(0.05, 0.1))
-
-    show_legend = num_categories > 1 and random.random() < 0.08
+    sig_top = max(
+        (bracket["y"] + bracket["text_offset"] + value_span * 0.03 for bracket in sig_brackets),
+        default=0.0,
+    )
+    computed_max_value = float(max(means.max(), max_dot_value, sig_top) + value_span * random.uniform(0.05, 0.1))
+    max_value = explicit_max_value if explicit_max_value is not None else computed_max_value
 
     return {
         "seed": seed,
         "plot_family": "scientific",
+        "scientific_variant": scientific_variant,
         "orientation": orientation,
         "color_mode": color_mode,
         "has_errorbars": has_errorbars,
@@ -698,7 +1127,10 @@ def generate_scientific_data(seed: int):
         "dot_xs": dot_xs,
         "dot_ys": dot_ys,
         "colors": colors,
-        "edgecolors": [darken_color(color, 0.32) for color in colors],
+        "edgecolors": [
+            (0.08, 0.08, 0.08) if plt.matplotlib.colors.to_rgb(color) == plt.matplotlib.colors.to_rgb("#ffffff") else darken_color(color, 0.32)
+            for color in colors
+        ],
         "slot_facecolors": slot_facecolors,
         "slot_edgecolors": slot_edgecolors,
         "dot_facecolors": dot_facecolors,
@@ -707,38 +1139,43 @@ def generate_scientific_data(seed: int):
         "title": title,
         "group_labels": group_labels,
         "cat_labels": cat_labels,
-        "legend": choose_legend_config(num_categories) if show_legend else no_legend_config(),
+        "legend": legend_config,
+        "legend_title": legend_title,
         "show_legend": show_legend,
         "value_label": metric["value_label"],
-        "group_axis_label": "",
+        "group_axis_label": group_axis_label,
         "max_value": max_value,
-        "marker_size": random.uniform(24.0, 44.0),
-        "marker_alpha": 0.95,
-        "bar_alpha": random.uniform(0.72, 0.88),
-        "edge_linewidth": random.uniform(1.4, 1.9),
+        "marker_size": marker_size,
+        "marker_alpha": marker_alpha,
+        "bar_alpha": bar_alpha,
+        "edge_linewidth": edge_linewidth,
         "grid_enabled": False,
         "grid_style": "--",
         "hide_top_right": True,
-        "title_enabled": True,
+        "title_enabled": title_enabled,
         "has_outliers": True,
         "outlier_density": "sample_points",
         "outlier_side_mode": "mixed_in_bar",
-        "outlier_pattern": chart_variant,
+        "outlier_pattern": scientific_variant,
         "outlier_layout": dot_variant,
         "outlier_variance": random.choices(["tight", "mixed", "loose"], weights=[0.26, 0.48, 0.26], k=1)[0],
         "sig_brackets": sig_brackets,
-        "x_tick_rotation": random.choice([0, 0, 0, 28, 40]),
+        "x_tick_rotation": x_tick_rotation,
         "axis_theme": "scientific",
-        "title_fontsize": random.uniform(13.0, 15.5),
-        "tick_labelsize": random.uniform(9.5, 11.5),
-        "label_fontsize": random.uniform(11.0, 13.0),
-        "spine_linewidth": random.uniform(1.55, 2.1),
-        "tick_length": random.uniform(5.0, 7.5),
-        "tick_width": random.uniform(1.2, 1.6),
-        "layout_left": random.uniform(0.15, 0.19),
-        "layout_bottom": random.uniform(0.17, 0.22),
-        "layout_top": random.uniform(0.84, 0.9),
-        "layout_right": 0.98,
+        "title_fontsize": title_fontsize,
+        "tick_labelsize": tick_labelsize,
+        "label_fontsize": label_fontsize,
+        "spine_linewidth": spine_linewidth,
+        "tick_length": tick_length,
+        "tick_width": tick_width,
+        "layout_left": layout_left,
+        "layout_bottom": layout_bottom,
+        "layout_top": layout_top,
+        "layout_right": layout_right,
+        "panel_label": panel_label,
+        "bottom_blocks": bottom_blocks,
+        "block_linewidth": 1.4 if scientific_variant == "age_block" else 1.2,
+        "block_textsize": 11.0 if scientific_variant == "age_block" else 10.0,
     }
 
 
@@ -974,9 +1411,9 @@ def generate_classic_data(seed: int):
 def generate_data(seed: int):
     random.seed(seed)
     np.random.seed(seed)
-    plot_family = choose_plot_family()
+    plot_family, scientific_variant = choose_plot_blueprint(seed)
     if plot_family == "scientific":
-        return generate_scientific_data(seed)
+        return generate_scientific_data(seed, variant=scientific_variant)
     return generate_classic_data(seed)
 
 
@@ -990,6 +1427,10 @@ def apply_layout(fig, data):
         top = 0.74
     elif data.get("show_legend", True) and data["legend"]["family"] == "bottom_outside":
         bottom = 0.24
+    elif data.get("show_legend", True) and data["legend"]["family"] == "left_outside":
+        left = max(left, 0.28)
+    elif data.get("show_legend", True) and data["legend"]["family"] == "right_outside":
+        right = min(right, 0.86)
 
     fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
 
@@ -1100,13 +1541,14 @@ def add_legend(ax, data, mask_mode: bool):
 
     legend = data["legend"]
     handles = build_legend_handles(data, mask_mode=mask_mode)
+    legend_title = data.get("legend_title")
 
     leg = ax.legend(
         handles=handles,
         labels=data["cat_labels"],
-        title="Categories",
-        fontsize=9,
-        title_fontsize=10,
+        title=legend_title,
+        fontsize=data.get("legend_fontsize", 9),
+        title_fontsize=data.get("legend_title_fontsize", 10),
         loc=legend["loc"],
         bbox_to_anchor=legend["bbox_to_anchor"],
         ncol=legend["ncol"],
@@ -1121,7 +1563,8 @@ def add_legend(ax, data, mask_mode: bool):
         frame.set_facecolor("white")
         frame.set_edgecolor("white")
         frame.set_alpha(1.0)
-        leg.get_title().set_color("white")
+        if leg.get_title() is not None:
+            leg.get_title().set_color("white")
         for text in leg.get_texts():
             text.set_color("white")
     else:
@@ -1230,6 +1673,68 @@ def draw_significance_brackets(ax, data, mask_mode: bool):
             )
 
 
+def draw_bottom_blocks(ax, data, mask_mode: bool):
+    if data["orientation"] != "vertical":
+        return
+
+    blocks = data.get("bottom_blocks", [])
+    if not blocks:
+        return
+
+    min_offset = float(np.min(data["bar_offsets"])) if len(data["bar_offsets"]) else 0.0
+    max_offset = float(np.max(data["bar_offsets"])) if len(data["bar_offsets"]) else 0.0
+    line_width = data.get("block_linewidth", 1.2)
+    text_size = data.get("block_textsize", 10.0)
+    text_color = "white" if mask_mode else "#111111"
+    line_color = "white" if mask_mode else "#111111"
+
+    for block in blocks:
+        start_idx = block["start_idx"]
+        end_idx = block["end_idx"]
+        line_y = block.get("line_y", -0.13)
+        text_y = block.get("text_y", line_y - 0.05)
+        left = data["group_positions"][start_idx] + min_offset - data["bar_width"] * 0.62
+        right = data["group_positions"][end_idx] + max_offset + data["bar_width"] * 0.62
+        ax.plot(
+            [left, right],
+            [line_y, line_y],
+            transform=ax.get_xaxis_transform(),
+            color=line_color,
+            linewidth=2.0 if mask_mode else line_width,
+            clip_on=False,
+            zorder=6,
+        )
+        if not mask_mode:
+            ax.text(
+                (left + right) / 2.0,
+                text_y,
+                block["label"],
+                transform=ax.get_xaxis_transform(),
+                ha="center",
+                va="top",
+                fontsize=text_size,
+                color=text_color,
+            )
+
+
+def draw_panel_label(ax, data, mask_mode: bool):
+    panel_label = data.get("panel_label")
+    if mask_mode or not panel_label:
+        return
+
+    ax.text(
+        panel_label.get("x", -0.14),
+        panel_label.get("y", 1.04),
+        panel_label["text"],
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=panel_label.get("fontsize", 24),
+        fontweight=panel_label.get("fontweight", "bold"),
+        color=panel_label.get("color", "#111111"),
+    )
+
+
 def plot_chart(ax, data, mode: str = "rgb", only_class: str | None = None):
     mask_mode = mode == "mask"
     configure_axes(ax, data, mask_mode=mask_mode)
@@ -1241,8 +1746,11 @@ def plot_chart(ax, data, mode: str = "rgb", only_class: str | None = None):
     if only_class in (None, "line"):
         draw_errorbars(ax, data, mask_mode=mask_mode)
         draw_significance_brackets(ax, data, mask_mode=mask_mode)
+        draw_bottom_blocks(ax, data, mask_mode=mask_mode)
     if only_class in (None, "legend"):
         add_legend(ax, data, mask_mode=mask_mode)
+    if only_class is None:
+        draw_panel_label(ax, data, mask_mode=mask_mode)
 
 
 def render_rgb_image(data):
@@ -1432,6 +1940,8 @@ def create_full_dataset(
 
         generation_stats[f"orientation:{data['orientation']}"] += 1
         generation_stats[f"family:{data['plot_family']}"] += 1
+        if data["plot_family"] == "scientific":
+            generation_stats[f"scientific_variant:{data.get('scientific_variant', 'base')}"] += 1
         generation_stats[f"color_mode:{data['color_mode']}"] += 1
         generation_stats[f"legend:{data['legend']['family']}"] += 1
         generation_stats[f"errorbars:{'yes' if data['has_errorbars'] else 'no'}"] += 1
@@ -1483,10 +1993,10 @@ def create_full_dataset(
     ]
     info = {
         "description": "Synthetic jittered bar chart dataset for SAM 3 fine-tuning",
-        "version": "3.0",
+        "version": "3.2",
         "year": 2026,
         "contributor": "Generated dataset",
-        "date_created": "2026-04-06",
+        "date_created": "2026-04-07",
     }
 
     train_json = {
